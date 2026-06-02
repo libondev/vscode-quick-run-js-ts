@@ -1,7 +1,7 @@
 {
   "name": "quick-run-js-ts",
   "displayName": "Quick Run JS/TS",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "One-click run for JavaScript and TypeScript files with automatic Node.js version detection and untitled file",
   "categories": [
     "Other"
@@ -55,7 +55,7 @@
     "commands": [
       {
         "command": "quick-run-js-ts.runFile",
-        "title": "Run File",
+        "title": "Quick Run JS/TS: Run",
         "icon": "$(play)"
       }
     ],
@@ -64,7 +64,7 @@
         {
           "when": "editorLangId === javascript || editorLangId === typescript",
           "command": "quick-run-js-ts.runFile",
-          "group": "navigation"
+          "group": "navigation@-999"
         }
       ]
     },
