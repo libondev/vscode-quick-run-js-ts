@@ -39,6 +39,7 @@
     "lint": "oxlint --fix",
     "fmt": "oxfmt",
     "check": "oxlint && oxfmt --check",
+    "pack": "vsce package --no-dependencies",
     "package": "vsce package"
   },
   "devDependencies": {
