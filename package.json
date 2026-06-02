@@ -1,0 +1,94 @@
+{
+  "name": "quick-run-js-ts",
+  "displayName": "Quick Run JS/TS",
+  "version": "0.0.1",
+  "description": "One-click run for JavaScript and TypeScript files with automatic Node.js version detection and untitled file",
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "cjs",
+    "commonjs",
+    "cts",
+    "esm",
+    "execute",
+    "javascript",
+    "mjs",
+    "mts",
+    "node",
+    "run",
+    "tsx",
+    "typescript"
+  ],
+  "homepage": "https://github.com/libondev/quick-run-js-ts#readme",
+  "bugs": {
+    "url": "https://github.com/libondev/quick-run-js-ts/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/libondev/quick-run-js-ts.git"
+  },
+  "publisher": "banlify",
+  "type": "module",
+  "main": "./dist/extension.js",
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "tsdown",
+    "watch": "tsdown --watch",
+    "lint": "oxlint --fix",
+    "fmt": "oxfmt",
+    "check": "oxlint && oxfmt --check",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "~22.19.19",
+    "@types/vscode": "^1.76.0",
+    "@vscode/vsce": "^2.0.0",
+    "oxfmt": "latest",
+    "oxlint": "latest",
+    "tsdown": "latest",
+    "typescript": "^5.0.0"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "quick-run-js-ts.runFile",
+        "title": "Run File",
+        "icon": "$(play)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "editorLangId === javascript || editorLangId === typescript",
+          "command": "quick-run-js-ts.runFile",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Quick Run JS/TS",
+      "properties": {
+        "quickRunJsTs.nodeCommand": {
+          "type": "string",
+          "default": "node",
+          "description": "Run the runtime command of js file, For example, bun/deno."
+        },
+        "quickRunJsTs.tsFallbackCommand": {
+          "type": "string",
+          "default": "npx --yes tsx",
+          "description": "Fallback command for TS files when Node.js version does not support native TypeScript."
+        }
+      }
+    }
+  },
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:typescript"
+  ],
+  "icon": "assets/logo.png",
+  "engines": {
+    "vscode": "^1.76.0"
+  }
+}
