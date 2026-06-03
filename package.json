@@ -1,8 +1,8 @@
 {
   "name": "quick-run-js-ts",
   "displayName": "Quick Run JS/TS",
-  "version": "0.0.2",
-  "description": "One-click run for JavaScript and TypeScript files with automatic Node.js version detection and untitled file",
+  "version": "0.0.3",
+  "description": "Run JS/TS files or selections in VS Code with one click, including untitled scratch files and smart TS fallback.",
   "categories": [
     "Other"
   ],
@@ -57,6 +57,11 @@
         "command": "quick-run-js-ts.runFile",
         "title": "Quick Run JS/TS: Run",
         "icon": "$(play)"
+      },
+      {
+        "command": "quick-run-js-ts.runSelection",
+        "title": "Quick Run JS/TS: Run Selection",
+        "icon": "$(run-below)"
       }
     ],
     "menus": {
@@ -64,7 +69,12 @@
         {
           "when": "editorLangId === javascript || editorLangId === typescript",
           "command": "quick-run-js-ts.runFile",
-          "group": "navigation@-999"
+          "group": "navigation@-9999"
+        },
+        {
+          "when": "(editorLangId === javascript || editorLangId === typescript) && editorHasSelection",
+          "command": "quick-run-js-ts.runSelection",
+          "group": "navigation@-9998"
         }
       ]
     },

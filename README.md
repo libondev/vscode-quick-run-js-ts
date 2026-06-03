@@ -1,11 +1,14 @@
 # Quick Run JS/TS
 
-A VS Code extension that lets you run JavaScript and TypeScript files with a single click, including unsaved scratch files. Automatically detects your Node.js version and uses native TypeScript support when available.
+[简体中文](./README.zh-CN.md)
+
+A VS Code extension that lets you run JavaScript and TypeScript files or selected code with a single click, including unsaved scratch files. It automatically detects your Node.js version and uses native TypeScript support when available.
 
 ## Features
 
 - One-click execution via the play button in the editor title bar
-- **Untitled file support** — run unsaved JavaScript/TypeScript scratch files without saving first
+- Run the whole file or only the selected lines
+- **Untitled file support** - run unsaved JavaScript/TypeScript scratch files without saving first
 - Automatic Node.js version detection:
   - **Node.js >= 23.6**: Runs TypeScript files natively
   - **Node.js >= 22.6**: Uses `--experimental-strip-types` flag
@@ -23,63 +26,33 @@ code --install-extension banlify.quick-run-js-ts
 
 ## Usage
 
-1. Open a `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, or `.cts` file (or create an untitled file and set the language to JavaScript/TypeScript)
-2. Click the play button in the editor title bar
-3. The file runs in a terminal panel
+### Run A File
 
-> **Tip:** For untitled files, the content is written to a temporary file, executed, and cleaned up automatically.
+1. Open a `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, or `.cts` file.
+2. Click **Quick Run JS/TS: Run** from the editor title bar.
+3. The file runs in a shared terminal panel.
+
+You can also create an untitled editor, set the language mode to JavaScript or TypeScript, and run it before saving.
+
+### Run Selected Code
+
+1. Select one or more lines in a JavaScript or TypeScript editor.
+2. Click **Quick Run JS/TS: Run Selection** from the editor title bar.
+3. The selected lines are copied to a temporary file and executed.
+
+> **Tip:** Untitled files and selections are written to temporary files, executed, and cleaned up automatically after the task ends.
+
+### TypeScript Runtime Behavior
+
+Quick Run JS/TS chooses the TypeScript command based on your installed Node.js version:
+
+- **Node.js >= 23.6**: `node <file>`
+- **Node.js >= 22.6**: `node --experimental-strip-types <file>`
+- **Older Node.js versions**: `npx --yes tsx <file>` by default
 
 ## Configuration
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `quickRunJsTs.nodeCommand` | `node` | Node.js runtime command used to execute JS/TS files |
+| `quickRunJsTs.nodeCommand` | `node` | Runtime command used to execute JS files and supported TS files. You can set it to another runtime such as `bun` or `deno`. |
 | `quickRunJsTs.tsFallbackCommand` | `npx --yes tsx` | Fallback command for TS files when native support is unavailable |
-
-## Development
-
-### Prerequisites
-
-- Node.js >= 22.18.0 (required by tsdown at build time)
-
-### Commands
-
-```bash
-# Install dependencies
-npm install
-
-# Build the extension
-npm run build
-
-# Watch mode for development
-npm run watch
-
-# Lint with oxlint
-npm run lint
-
-# Format with oxfmt
-npm run format
-
-# Run lint + format check
-npm run check
-
-# Package for publishing
-npm run package
-```
-
-### Project Structure
-
-```
-├── src/
-│   └── extension.ts    # Extension entry point
-├── playground/         # Sample JS/TS files for testing
-├── tsconfig.json       # TypeScript configuration
-├── tsdown.config.ts    # tsdown bundler configuration
-├── .oxlintrc.json      # oxlint linter configuration
-├── .oxfmtrc.json       # oxfmt formatter configuration
-└── package.json        # Extension manifest
-```
-
-## License
-
-[MIT](https://github.com/libondev/quick-run-js-ts/blob/main/LICENSE)

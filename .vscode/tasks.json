@@ -9,7 +9,7 @@
         "panel": "shared",
         "reveal": "silent"
       },
-      "problemMatcher": "$tsc"
+      "problemMatcher": []
     },
     {
       "type": "npm",
@@ -20,7 +20,7 @@
         "reveal": "never"
       },
       "isBackground": true,
-      "problemMatcher": "$tsc-watch"
+      "problemMatcher": []
     }
   ]
 }
