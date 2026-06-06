@@ -1,3 +1,4 @@
+// @ts-ignore
 const process = require('node:process')
 
 interface RuntimeInfo {
@@ -12,8 +13,9 @@ function getRuntimeInfo(): RuntimeInfo {
   }
 }
 
+// @ts-ignore
 module.exports = {
-  getRuntimeInfo
+  getRuntimeInfo,
 }
 
 console.table(getRuntimeInfo())

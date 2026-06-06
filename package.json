@@ -90,13 +90,18 @@
           "type": "string",
           "default": "npx --yes tsx",
           "description": "Fallback command for TS files when Node.js version does not support native TypeScript."
+        },
+        "quickRunJsTs.enableDebug": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run files with the VS Code debugger so breakpoints are hit. Only applies to saved files; selections and untitled files still run as tasks."
         }
       }
     }
   },
   "activationEvents": [
-    "onLanguage:javascript",
-    "onLanguage:typescript"
+    "onCommand:quick-run-js-ts.runFile",
+    "onCommand:quick-run-js-ts.runSelection"
   ],
   "icon": "assets/logo.png",
   "engines": {

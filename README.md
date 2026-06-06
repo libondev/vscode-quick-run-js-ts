@@ -9,6 +9,7 @@ A VS Code extension that lets you run JavaScript and TypeScript files or selecte
 - One-click execution via the play button in the editor title bar
 - Run the whole file or only the selected lines
 - **Untitled file support** - run unsaved JavaScript/TypeScript scratch files without saving first
+- **Debug support** - optionally run saved files with the VS Code debugger to hit breakpoints
 - Automatic Node.js version detection:
   - **Node.js >= 23.6**: Runs TypeScript files natively
   - **Node.js >= 22.6**: Uses `--experimental-strip-types` flag
@@ -42,6 +43,16 @@ You can also create an untitled editor, set the language mode to JavaScript or T
 
 > **Tip:** Untitled files and selections are written to temporary files, executed, and cleaned up automatically after the task ends.
 
+### Debug Mode
+
+You can run saved files with the VS Code debugger so breakpoints are hit.
+
+1. Open VS Code settings and enable `quickRunJsTs.enableDebug`.
+2. Click **Quick Run JS/TS: Run** on a saved file.
+3. The file launches in debug mode; breakpoints in the original file will be active.
+
+> Debug mode only applies to saved files. Untitled files and selections always run as tasks.
+
 ### TypeScript Runtime Behavior
 
 Quick Run JS/TS chooses the TypeScript command based on your installed Node.js version:
@@ -52,7 +63,8 @@ Quick Run JS/TS chooses the TypeScript command based on your installed Node.js v
 
 ## Configuration
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `quickRunJsTs.runtime` | `node` | Runtime command used to execute JS files and supported TS files. You can set it to another runtime such as `bun` or `deno`. |
-| `quickRunJsTs.tsFallbackCommand` | `npx --yes tsx` | Fallback command for TS files when native support is unavailable |
+| Setting                          | Default         | Description                                                                                                                 |
+| -------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `quickRunJsTs.runtime`           | `node`          | Runtime command used to execute JS files and supported TS files. You can set it to another runtime such as `bun` or `deno`. |
+| `quickRunJsTs.tsFallbackCommand` | `npx --yes tsx` | Fallback command for TS files when native support is unavailable                                                            |
+| `quickRunJsTs.enableDebug`       | `false`         | Run saved files with the VS Code debugger so breakpoints are hit                                                            |

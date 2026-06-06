@@ -30,26 +30,27 @@ interface QuickRunTaskDefinition extends vscode.TaskDefinition {
 
 let cachedNodeVersion: number[] | null = null
 
-function getNodeVersion(): number[] {
-  if (cachedNodeVersion) {
-    return cachedNodeVersion
-  }
-
+function resolveNodeVersion(): number[] {
   try {
-    const output = execSync('node -v', { encoding: 'utf-8', timeout: 5000 }).trim()
-    const match = output.match(/v(\d+)\.(\d+)\.(\d+)/)
-    if (match) {
-      cachedNodeVersion = [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])]
-      return cachedNodeVersion
-    }
+    const output = execSync('node -v', { encoding: 'utf-8', timeout: 1000 }).trim()
+    const versions = output.match(/v(\d+)\.(\d+)\.(\d+)/)?.map(Number) ?? [0, 0, 0]
+    return versions
   } catch {}
 
   return [0, 0, 0]
 }
 
-function isVersionGte(major: number, minor: number): boolean {
-  const [M, m] = getNodeVersion()
-  return M > major || (M === major && m >= minor)
+function isNodeVersionGte(major: number, minor: number): boolean {
+  if (!cachedNodeVersion) {
+    cachedNodeVersion = resolveNodeVersion()
+  }
+
+  const [cachedMajor, cachedMinor] = cachedNodeVersion
+  return cachedMajor > major || (cachedMajor === major && cachedMinor >= minor)
+}
+
+function isNode(runtime: string): boolean {
+  return runtime.endsWith('node')
 }
 
 // ---------------------------------------------------------------------------
@@ -85,10 +86,7 @@ interface RunContext {
 }
 
 function resolveExtension(document: vscode.TextDocument): string | null {
-  if (document.isUntitled) {
-    return LANG_EXT_MAP[document.languageId] ?? null
-  }
-  return path.extname(document.fileName).toLowerCase()
+  return LANG_EXT_MAP[document.languageId] || path.extname(document.fileName).toLowerCase() || null
 }
 
 function isSupportedExtension(ext: string): boolean {
@@ -146,22 +144,28 @@ function collectSelectedLines(editor: vscode.TextEditor): string {
 // Task execution
 // ---------------------------------------------------------------------------
 
+function resolveTsCommand(ext: string, runtime: string): string {
+  if (JS_EXTENSIONS.has(ext) || !isNode(runtime)) {
+    return runtime
+  }
+
+  if (isNodeVersionGte(23, 6)) {
+    return runtime
+  }
+  if (isNodeVersionGte(22, 6)) {
+    return `${runtime} --experimental-strip-types`
+  }
+
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
+  const fallback = config.get<string>('tsFallbackCommand', 'npx --yes tsx')
+  return fallback
+}
+
 function buildRunCommand(filePath: string, ext: string): string {
   const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
   const nodeCmd = config.get<string>('runtime', 'node')
-
-  if (JS_EXTENSIONS.has(ext)) {
-    return `${nodeCmd} "${filePath}"`
-  }
-
-  const fallbackCmd = config.get<string>('tsFallbackCommand', 'npx --yes tsx')
-  if (isVersionGte(23, 6)) {
-    return `${nodeCmd} "${filePath}"`
-  }
-  if (isVersionGte(22, 6)) {
-    return `${nodeCmd} --experimental-strip-types "${filePath}"`
-  }
-  return `${fallbackCmd} "${filePath}"`
+  const cmd = resolveTsCommand(ext, nodeCmd)
+  return `${cmd} ${JSON.stringify(filePath)}`
 }
 
 function runFile(filePath: string, ext: string, isTemp: boolean) {
@@ -187,6 +191,27 @@ function runFile(filePath: string, ext: string, isTemp: boolean) {
 }
 
 // ---------------------------------------------------------------------------
+// Debug execution
+// ---------------------------------------------------------------------------
+
+function runWithDebug(filePath: string, ext: string) {
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
+  const nodeCmd = config.get<string>('runtime', 'node')
+  const cmd = resolveTsCommand(ext, nodeCmd)
+  const parts = cmd.split(/\s+/)
+
+  vscode.debug.startDebugging(undefined, {
+    type: 'node',
+    request: 'launch',
+    name: 'Quick Run JS/TS',
+    program: filePath,
+    runtimeExecutable: parts[0],
+    runtimeArgs: parts.slice(1),
+    console: 'integratedTerminal',
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Command handlers
 // ---------------------------------------------------------------------------
 
@@ -197,8 +222,13 @@ function handleRunFile() {
   }
 
   const { document, ext } = ctx
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
+  const enableDebug = config.get<boolean>('enableDebug', false)
+
   if (document.isUntitled) {
     runFile(writeTempFile(ext, document.getText()), ext, true)
+  } else if (enableDebug) {
+    runWithDebug(document.fileName, ext)
   } else {
     runFile(document.fileName, ext, false)
   }
@@ -243,4 +273,11 @@ export const activate = (context: vscode.ExtensionContext) => {
   )
 }
 
-export function deactivate() {}
+export function deactivate() {
+  try {
+    for (const filePath of pendingCleanup) {
+      fs.unlinkSync(filePath)
+    }
+  } catch {}
+  pendingCleanup.clear()
+}
