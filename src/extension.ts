@@ -20,6 +20,7 @@ const LANG_EXT_MAP: Record<string, string> = {
 }
 
 interface QuickRunTaskDefinition extends vscode.TaskDefinition {
+  type: typeof TASK_TYPE
   filePath: string
 }
 
@@ -147,7 +148,7 @@ function collectSelectedLines(editor: vscode.TextEditor): string {
 
 function buildRunCommand(filePath: string, ext: string): string {
   const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
-  const nodeCmd = config.get<string>('nodeCommand', 'node')
+  const nodeCmd = config.get<string>('runtime', 'node')
 
   if (JS_EXTENSIONS.has(ext)) {
     return `${nodeCmd} "${filePath}"`

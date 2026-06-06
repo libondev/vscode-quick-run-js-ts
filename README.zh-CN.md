@@ -54,5 +54,5 @@ Quick Run JS/TS 会根据已安装的 Node.js 版本选择 TypeScript 执行命�
 
 | 设置项 | 默认值 | 说明 |
 |--------|--------|------|
-| `quickRunJsTs.nodeCommand` | `node` | 用于执行 JS 文件和受支持 TS 文件的运行时命令。可以设置为 `bun`、`deno` 等其他运行时。 |
+| `quickRunJsTs.runtime` | `node` | 用于执行 JS 文件和受支持 TS 文件的运行时命令。可以设置为 `bun`、`deno` 等其他运行时。 |
 | `quickRunJsTs.tsFallbackCommand` | `npx --yes tsx` | 当 Node.js 不支持原生 TypeScript 时使用的 TS 回退命令 |

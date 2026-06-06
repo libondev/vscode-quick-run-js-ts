@@ -81,7 +81,7 @@
     "configuration": {
       "title": "Quick Run JS/TS",
       "properties": {
-        "quickRunJsTs.nodeCommand": {
+        "quickRunJsTs.runtime": {
           "type": "string",
           "default": "node",
           "description": "Run the runtime command of js file, For example, bun/deno."

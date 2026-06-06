@@ -54,5 +54,5 @@ Quick Run JS/TS chooses the TypeScript command based on your installed Node.js v
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `quickRunJsTs.nodeCommand` | `node` | Runtime command used to execute JS files and supported TS files. You can set it to another runtime such as `bun` or `deno`. |
+| `quickRunJsTs.runtime` | `node` | Runtime command used to execute JS files and supported TS files. You can set it to another runtime such as `bun` or `deno`. |
 | `quickRunJsTs.tsFallbackCommand` | `npx --yes tsx` | Fallback command for TS files when native support is unavailable |
