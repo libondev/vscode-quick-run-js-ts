@@ -1,7 +1,7 @@
 {
   "name": "quick-run-js-ts",
   "displayName": "Quick Run JS/TS",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Run JS/TS files or selections in VS Code with one click, including untitled scratch files and smart TS fallback.",
   "categories": [
     "Other"
