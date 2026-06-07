@@ -9,7 +9,7 @@ A VS Code extension that lets you run JavaScript and TypeScript files or selecte
 - One-click execution via the play button in the editor title bar
 - Run the whole file or only the selected lines
 - **Untitled file support** - run unsaved JavaScript/TypeScript scratch files without saving first
-- **Debug support** - optionally run saved files with the VS Code debugger to hit breakpoints
+- **Smart debug support** - automatically runs with the VS Code debugger when breakpoints are set
 - Automatic Node.js version detection:
   - **Node.js >= 23.6**: Runs TypeScript files natively
   - **Node.js >= 22.6**: Uses `--experimental-strip-types` flag
@@ -45,11 +45,13 @@ You can also create an untitled editor, set the language mode to JavaScript or T
 
 ### Debug Mode
 
-You can run saved files with the VS Code debugger so breakpoints are hit.
+The extension can automatically run saved files with the VS Code debugger.
 
-1. Open VS Code settings and enable `quickRunJsTs.enableDebug`.
-2. Click **Quick Run JS/TS: Run** on a saved file.
-3. The file launches in debug mode; breakpoints in the original file will be active.
+- **`auto` (default)** - debugs only when breakpoints are set in the file
+- **`always`** - always runs saved files in debug mode
+- **`never`** - always runs as tasks
+
+Set it via `quickRunJsTs.debugMode` in VS Code settings.
 
 > Debug mode only applies to saved files. Untitled files and selections always run as tasks.
 
@@ -67,4 +69,4 @@ Quick Run JS/TS chooses the TypeScript command based on your installed Node.js v
 | -------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `quickRunJsTs.runtime`           | `node`          | Runtime command used to execute JS files and supported TS files. You can set it to another runtime such as `bun` or `deno`. |
 | `quickRunJsTs.tsFallbackCommand` | `npx --yes tsx` | Fallback command for TS files when native support is unavailable                                                            |
-| `quickRunJsTs.enableDebug`       | `false`         | Run saved files with the VS Code debugger so breakpoints are hit                                                            |
+| `quickRunJsTs.debugMode`         | `auto`          | When to run saved files with the VS Code debugger: `auto` = when breakpoints are set, `always` = always, `never` = never    |

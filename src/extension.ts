@@ -1,8 +1,28 @@
+import type {
+  ExtensionContext,
+  TaskDefinition,
+  TaskEndEvent,
+  TextDocument,
+  TextEditor,
+} from 'vscode'
 import { execSync } from 'node:child_process'
-import * as fs from 'node:fs'
-import * as os from 'node:os'
-import * as path from 'node:path'
-import * as vscode from 'vscode'
+import { randomUUID } from 'node:crypto'
+import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, extname, join } from 'node:path'
+import {
+  commands,
+  debug,
+  tasks,
+  window,
+  workspace,
+  Task,
+  TaskScope,
+  ShellExecution,
+  TaskRevealKind,
+  TaskPanelKind,
+  SourceBreakpoint,
+} from 'vscode'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -19,7 +39,7 @@ const LANG_EXT_MAP: Record<string, string> = {
   typescript: '.ts',
 }
 
-interface QuickRunTaskDefinition extends vscode.TaskDefinition {
+interface QuickRunTaskDefinition extends TaskDefinition {
   type: typeof TASK_TYPE
   filePath: string
 }
@@ -33,8 +53,10 @@ let cachedNodeVersion: number[] | null = null
 function resolveNodeVersion(): number[] {
   try {
     const output = execSync('node -v', { encoding: 'utf-8', timeout: 1000 }).trim()
-    const versions = output.match(/v(\d+)\.(\d+)\.(\d+)/)?.map(Number) ?? [0, 0, 0]
-    return versions
+    const match = output.match(/v(\d+)\.(\d+)\.(\d+)/)
+    if (match) {
+      return [Number(match[1]), Number(match[2]), Number(match[3])]
+    }
   } catch {}
 
   return [0, 0, 0]
@@ -50,7 +72,8 @@ function isNodeVersionGte(major: number, minor: number): boolean {
 }
 
 function isNode(runtime: string): boolean {
-  return runtime.endsWith('node')
+  const base = basename(runtime)
+  return base === 'node' || base === 'node.exe'
 }
 
 // ---------------------------------------------------------------------------
@@ -60,16 +83,16 @@ function isNode(runtime: string): boolean {
 const pendingCleanup = new Set<string>()
 
 function writeTempFile(ext: string, content: string): string {
-  const tmpDir = path.join(os.tmpdir(), 'quick-run-js-ts')
-  fs.mkdirSync(tmpDir, { recursive: true })
-  const filePath = path.join(tmpDir, `snippet-${Date.now()}${ext}`)
-  fs.writeFileSync(filePath, content, 'utf-8')
+  const tmpDir = join(tmpdir(), 'quick-run-js-ts')
+  mkdirSync(tmpDir, { recursive: true })
+  const filePath = join(tmpDir, `snippet-${randomUUID()}${ext}`)
+  writeFileSync(filePath, content, 'utf-8')
   return filePath
 }
 
 function cleanupTempFile(filePath: string) {
   try {
-    fs.unlinkSync(filePath)
+    unlinkSync(filePath)
   } finally {
     pendingCleanup.delete(filePath)
   }
@@ -80,13 +103,13 @@ function cleanupTempFile(filePath: string) {
 // ---------------------------------------------------------------------------
 
 interface RunContext {
-  editor: vscode.TextEditor
-  document: vscode.TextDocument
+  editor: TextEditor
+  document: TextDocument
   ext: string
 }
 
-function resolveExtension(document: vscode.TextDocument): string | null {
-  return LANG_EXT_MAP[document.languageId] || path.extname(document.fileName).toLowerCase() || null
+function resolveExtension(document: TextDocument): string | null {
+  return LANG_EXT_MAP[document.languageId] || extname(document.fileName).toLowerCase() || null
 }
 
 function isSupportedExtension(ext: string): boolean {
@@ -98,7 +121,7 @@ function isSupportedExtension(ext: string): boolean {
  * there is no editor or the file type is not runnable (warning is shown).
  */
 function getRunContext(): RunContext | null {
-  const editor = vscode.window.activeTextEditor
+  const editor = window.activeTextEditor
   if (!editor) {
     return null
   }
@@ -106,7 +129,7 @@ function getRunContext(): RunContext | null {
   const document = editor.document
   const ext = resolveExtension(document)
   if (!ext || !isSupportedExtension(ext)) {
-    vscode.window.showWarningMessage('Unsupported file type')
+    window.showWarningMessage('Unsupported file type')
     return null
   }
 
@@ -114,7 +137,7 @@ function getRunContext(): RunContext | null {
 }
 
 /** Concatenates the full text of every line touched by a non-empty selection. */
-function collectSelectedLines(editor: vscode.TextEditor): string {
+function collectSelectedLines(editor: TextEditor): string {
   const { document } = editor
   const lineNumbers = new Set<number>()
 
@@ -156,13 +179,13 @@ function resolveTsCommand(ext: string, runtime: string): string {
     return `${runtime} --experimental-strip-types`
   }
 
-  const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
+  const config = workspace.getConfiguration(CONFIG_SECTION)
   const fallback = config.get<string>('tsFallbackCommand', 'npx --yes tsx')
   return fallback
 }
 
 function buildRunCommand(filePath: string, ext: string): string {
-  const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
+  const config = workspace.getConfiguration(CONFIG_SECTION)
   const nodeCmd = config.get<string>('runtime', 'node')
   const cmd = resolveTsCommand(ext, nodeCmd)
   return `${cmd} ${JSON.stringify(filePath)}`
@@ -170,16 +193,16 @@ function buildRunCommand(filePath: string, ext: string): string {
 
 function runFile(filePath: string, ext: string, isTemp: boolean) {
   const definition: QuickRunTaskDefinition = { type: TASK_TYPE, filePath }
-  const task = new vscode.Task(
+  const task = new Task(
     definition,
-    vscode.TaskScope.Workspace,
+    TaskScope.Workspace,
     'Run JS/TS',
     TASK_TYPE,
-    new vscode.ShellExecution(buildRunCommand(filePath, ext)),
+    new ShellExecution(buildRunCommand(filePath, ext)),
   )
   task.presentationOptions = {
-    reveal: vscode.TaskRevealKind.Always,
-    panel: vscode.TaskPanelKind.Shared,
+    reveal: TaskRevealKind.Always,
+    panel: TaskPanelKind.Shared,
     focus: true,
   }
 
@@ -187,7 +210,7 @@ function runFile(filePath: string, ext: string, isTemp: boolean) {
     pendingCleanup.add(filePath)
   }
 
-  vscode.tasks.executeTask(task)
+  tasks.executeTask(task)
 }
 
 // ---------------------------------------------------------------------------
@@ -195,12 +218,12 @@ function runFile(filePath: string, ext: string, isTemp: boolean) {
 // ---------------------------------------------------------------------------
 
 function runWithDebug(filePath: string, ext: string) {
-  const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
+  const config = workspace.getConfiguration(CONFIG_SECTION)
   const nodeCmd = config.get<string>('runtime', 'node')
   const cmd = resolveTsCommand(ext, nodeCmd)
   const parts = cmd.split(/\s+/)
 
-  vscode.debug.startDebugging(undefined, {
+  debug.startDebugging(undefined, {
     type: 'node',
     request: 'launch',
     name: 'Quick Run JS/TS',
@@ -215,6 +238,29 @@ function runWithDebug(filePath: string, ext: string) {
 // Command handlers
 // ---------------------------------------------------------------------------
 
+function hasBreakpoints(filePath: string): boolean {
+  return debug.breakpoints.some((bp) => {
+    if (bp instanceof SourceBreakpoint) {
+      return bp.location.uri.fsPath === filePath
+    }
+    return false
+  })
+}
+
+function wantsDebug(document: TextDocument): boolean {
+  const config = workspace.getConfiguration(CONFIG_SECTION)
+  const mode = config.get<string>('debugMode', 'auto')
+
+  if (mode === 'never') {
+    return false
+  }
+  if (mode === 'always') {
+    return true
+  }
+
+  return !document.isUntitled && hasBreakpoints(document.fileName)
+}
+
 function handleRunFile() {
   const ctx = getRunContext()
   if (!ctx) {
@@ -222,12 +268,15 @@ function handleRunFile() {
   }
 
   const { document, ext } = ctx
-  const config = vscode.workspace.getConfiguration(CONFIG_SECTION)
-  const enableDebug = config.get<boolean>('enableDebug', false)
 
   if (document.isUntitled) {
+    if (wantsDebug(document)) {
+      window.showWarningMessage(
+        'Debug mode is not available for untitled files. Please save the file first.',
+      )
+    }
     runFile(writeTempFile(ext, document.getText()), ext, true)
-  } else if (enableDebug) {
+  } else if (wantsDebug(document)) {
     runWithDebug(document.fileName, ext)
   } else {
     runFile(document.fileName, ext, false)
@@ -242,14 +291,18 @@ function handleRunSelection() {
 
   const content = collectSelectedLines(ctx.editor)
   if (!content.trim()) {
-    vscode.window.showWarningMessage('No content selected to run')
+    window.showWarningMessage('No content selected to run')
     return
+  }
+
+  if (wantsDebug(ctx.document)) {
+    window.showWarningMessage('Debug mode is not available for running selections.')
   }
 
   runFile(writeTempFile(ctx.ext, content), ctx.ext, true)
 }
 
-function handleTaskEnd(event: vscode.TaskEndEvent) {
+function handleTaskEnd(event: TaskEndEvent) {
   const { definition } = event.execution.task
   if (definition.type !== TASK_TYPE) {
     return
@@ -265,18 +318,18 @@ function handleTaskEnd(event: vscode.TaskEndEvent) {
 // Activation
 // ---------------------------------------------------------------------------
 
-export const activate = (context: vscode.ExtensionContext) => {
+export const activate = (context: ExtensionContext) => {
   context.subscriptions.push(
-    vscode.commands.registerCommand('quick-run-js-ts.runFile', handleRunFile),
-    vscode.commands.registerCommand('quick-run-js-ts.runSelection', handleRunSelection),
-    vscode.tasks.onDidEndTask(handleTaskEnd),
+    commands.registerCommand('quick-run-js-ts.runFile', handleRunFile),
+    commands.registerCommand('quick-run-js-ts.runSelection', handleRunSelection),
+    tasks.onDidEndTask(handleTaskEnd),
   )
 }
 
 export function deactivate() {
   try {
     for (const filePath of pendingCleanup) {
-      fs.unlinkSync(filePath)
+      unlinkSync(filePath)
     }
   } catch {}
   pendingCleanup.clear()
