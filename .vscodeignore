@@ -3,3 +3,6 @@ src
 playground
 pnpm-lock.yaml
 tsconfig.json
+tsdown.config.ts
+vitest.config.ts
+src/__tests__/**

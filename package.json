@@ -39,6 +39,7 @@
     "lint": "oxlint --fix",
     "fmt": "oxfmt",
     "check": "oxlint && oxfmt --check",
+    "test": "vitest run",
     "pack": "vsce package --no-dependencies",
     "package": "vsce package"
   },
@@ -49,7 +50,8 @@
     "oxfmt": "latest",
     "oxlint": "latest",
     "tsdown": "latest",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^4.1.8"
   },
   "contributes": {
     "commands": [

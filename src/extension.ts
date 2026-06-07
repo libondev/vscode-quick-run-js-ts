@@ -31,10 +31,10 @@ import {
 const TASK_TYPE = 'quick-run-js-ts'
 const CONFIG_SECTION = 'quickRunJsTs'
 
-const JS_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.node'])
-const TS_EXTENSIONS = new Set(['.ts', '.mts', '.cts'])
+export const JS_EXTENSIONS = new Set(['.js', '.mjs', '.cjs', '.node'])
+export const TS_EXTENSIONS = new Set(['.ts', '.mts', '.cts'])
 
-const LANG_EXT_MAP: Record<string, string> = {
+export const LANG_EXT_MAP: Record<string, string> = {
   javascript: '.js',
   typescript: '.ts',
 }
@@ -62,7 +62,7 @@ function resolveNodeVersion(): number[] {
   return [0, 0, 0]
 }
 
-function isNodeVersionGte(major: number, minor: number): boolean {
+export function isNodeVersionGte(major: number, minor: number): boolean {
   if (!cachedNodeVersion) {
     cachedNodeVersion = resolveNodeVersion()
   }
@@ -71,7 +71,7 @@ function isNodeVersionGte(major: number, minor: number): boolean {
   return cachedMajor > major || (cachedMajor === major && cachedMinor >= minor)
 }
 
-function isNode(runtime: string): boolean {
+export function isNode(runtime: string): boolean {
   const base = basename(runtime)
   return base === 'node' || base === 'node.exe'
 }
@@ -80,9 +80,9 @@ function isNode(runtime: string): boolean {
 // Temp file management
 // ---------------------------------------------------------------------------
 
-const pendingCleanup = new Set<string>()
+export const pendingCleanup = new Set<string>()
 
-function writeTempFile(ext: string, content: string): string {
+export function writeTempFile(ext: string, content: string): string {
   const tmpDir = join(tmpdir(), 'quick-run-js-ts')
   mkdirSync(tmpDir, { recursive: true })
   const filePath = join(tmpDir, `snippet-${randomUUID()}${ext}`)
@@ -90,7 +90,7 @@ function writeTempFile(ext: string, content: string): string {
   return filePath
 }
 
-function cleanupTempFile(filePath: string) {
+export function cleanupTempFile(filePath: string) {
   try {
     unlinkSync(filePath)
   } finally {
@@ -108,11 +108,11 @@ interface RunContext {
   ext: string
 }
 
-function resolveExtension(document: TextDocument): string | null {
+export function resolveExtension(document: TextDocument): string | null {
   return LANG_EXT_MAP[document.languageId] || extname(document.fileName).toLowerCase() || null
 }
 
-function isSupportedExtension(ext: string): boolean {
+export function isSupportedExtension(ext: string): boolean {
   return JS_EXTENSIONS.has(ext) || TS_EXTENSIONS.has(ext)
 }
 
@@ -120,7 +120,7 @@ function isSupportedExtension(ext: string): boolean {
  * Returns the active editor along with its resolved extension, or `null` when
  * there is no editor or the file type is not runnable (warning is shown).
  */
-function getRunContext(): RunContext | null {
+export function getRunContext(): RunContext | null {
   const editor = window.activeTextEditor
   if (!editor) {
     return null
@@ -137,7 +137,7 @@ function getRunContext(): RunContext | null {
 }
 
 /** Concatenates the full text of every line touched by a non-empty selection. */
-function collectSelectedLines(editor: TextEditor): string {
+export function collectSelectedLines(editor: TextEditor): string {
   const { document } = editor
   const lineNumbers = new Set<number>()
 
@@ -167,7 +167,7 @@ function collectSelectedLines(editor: TextEditor): string {
 // Task execution
 // ---------------------------------------------------------------------------
 
-function resolveTsCommand(ext: string, runtime: string): string {
+export function resolveTsCommand(ext: string, runtime: string): string {
   if (JS_EXTENSIONS.has(ext) || !isNode(runtime)) {
     return runtime
   }
@@ -247,7 +247,7 @@ function hasBreakpoints(filePath: string): boolean {
   })
 }
 
-function wantsDebug(document: TextDocument): boolean {
+export function wantsDebug(document: TextDocument): boolean {
   const config = workspace.getConfiguration(CONFIG_SECTION)
   const mode = config.get<string>('debugMode', 'auto')
 
