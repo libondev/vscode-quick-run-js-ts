@@ -104,7 +104,19 @@
           "description": "Run files with the VS Code debugger. `auto` = debug only when breakpoints are set; `always` = always debug saved files; `never` = always run as tasks. Selections and untitled files always run as tasks."
         }
       }
-    }
+    },
+    "taskDefinitions": [
+      {
+        "type": "quick-run-js-ts",
+        "required": ["filePath"],
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "The file path to run"
+          }
+        }
+      }
+    ]
   },
   "activationEvents": [
     "onCommand:quick-run-js-ts.runFile",

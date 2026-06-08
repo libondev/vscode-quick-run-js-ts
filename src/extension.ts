@@ -16,6 +16,7 @@ import {
   tasks,
   window,
   workspace,
+  OutputChannel,
   Task,
   TaskScope,
   ShellExecution,
@@ -23,6 +24,21 @@ import {
   TaskPanelKind,
   SourceBreakpoint,
 } from 'vscode'
+
+// ---------------------------------------------------------------------------
+// Logger
+// ---------------------------------------------------------------------------
+
+let outputChannel: OutputChannel
+
+function log(message: string) {
+  if (!outputChannel) {
+    return
+  }
+
+  const timestamp = new Date().toISOString().slice(11, 23)
+  outputChannel.appendLine(`[${timestamp}] ${message}`)
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,9 +71,13 @@ function resolveNodeVersion(): number[] {
     const output = execSync('node -v', { encoding: 'utf-8', timeout: 1000 }).trim()
     const match = output.match(/v(\d+)\.(\d+)\.(\d+)/)
     if (match) {
-      return [Number(match[1]), Number(match[2]), Number(match[3])]
+      const version = [Number(match[1]), Number(match[2]), Number(match[3])]
+      return version
     }
-  } catch {}
+    log(`Failed to parse Node.js version from output: "${output}"`)
+  } catch (err) {
+    log(`Failed to detect Node.js version: ${err}`)
+  }
 
   return [0, 0, 0]
 }
@@ -93,6 +113,8 @@ export function writeTempFile(ext: string, content: string): string {
 export function cleanupTempFile(filePath: string) {
   try {
     unlinkSync(filePath)
+  } catch (err) {
+    log(`Failed to clean up temp file ${filePath}: ${err}`)
   } finally {
     pendingCleanup.delete(filePath)
   }
@@ -129,6 +151,7 @@ export function getRunContext(): RunContext | null {
   const document = editor.document
   const ext = resolveExtension(document)
   if (!ext || !isSupportedExtension(ext)) {
+    log(`Unsupported file type: "${ext}" (${document.fileName})`)
     window.showWarningMessage('Unsupported file type')
     return null
   }
@@ -180,8 +203,7 @@ export function resolveTsCommand(ext: string, runtime: string): string {
   }
 
   const config = workspace.getConfiguration(CONFIG_SECTION)
-  const fallback = config.get<string>('tsFallbackCommand', 'npx --yes tsx')
-  return fallback
+  return config.get<string>('tsFallbackCommand', 'npx --yes tsx')
 }
 
 function buildRunCommand(filePath: string, ext: string): string {
@@ -258,7 +280,11 @@ export function wantsDebug(document: TextDocument): boolean {
     return true
   }
 
-  return !document.isUntitled && hasBreakpoints(document.fileName)
+  // auto mode
+  if (document.isUntitled) {
+    return false
+  }
+  return hasBreakpoints(document.fileName)
 }
 
 function handleRunFile() {
@@ -319,11 +345,17 @@ function handleTaskEnd(event: TaskEndEvent) {
 // ---------------------------------------------------------------------------
 
 export const activate = (context: ExtensionContext) => {
+  outputChannel = window.createOutputChannel('Quick Run JS/TS')
+  context.subscriptions.push(outputChannel)
+
   context.subscriptions.push(
     commands.registerCommand('quick-run-js-ts.runFile', handleRunFile),
     commands.registerCommand('quick-run-js-ts.runSelection', handleRunSelection),
     tasks.onDidEndTask(handleTaskEnd),
   )
+
+  // Eagerly detect and cache the Node.js version
+  cachedNodeVersion = resolveNodeVersion()
 }
 
 export function deactivate() {
@@ -332,5 +364,7 @@ export function deactivate() {
       unlinkSync(filePath)
     }
   } catch {}
+
   pendingCleanup.clear()
+  outputChannel?.dispose()
 }

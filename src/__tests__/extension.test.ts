@@ -30,6 +30,10 @@ vi.mock('vscode', () => {
     window: {
       activeTextEditor: null as TextEditor | null,
       showWarningMessage: vi.fn<(msg: string) => void>(),
+      createOutputChannel: vi.fn<() => { appendLine: (msg: string) => void; dispose: () => void }>(() => ({
+        appendLine: vi.fn<(msg: string) => void>(),
+        dispose: vi.fn<() => void>(),
+      })),
     },
     workspace: {
       getConfiguration: vi.fn<() => typeof mockConfig>(() => mockConfig),
