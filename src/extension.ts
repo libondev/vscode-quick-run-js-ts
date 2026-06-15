@@ -232,6 +232,9 @@ function runFile(filePath: string, ext: string, isTemp: boolean) {
     pendingCleanup.add(filePath)
   }
 
+  // Clear previous terminal output before running a new task
+  commands.executeCommand('workbench.action.terminal.clear')
+
   tasks.executeTask(task)
 }
 
