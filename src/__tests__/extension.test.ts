@@ -1,12 +1,23 @@
+import type {
+  ExtensionContext,
+  TaskEndEvent,
+  TextDocument,
+  TextEditor,
+  Position,
+  Selection,
+  Disposable,
+  OutputChannel,
+  WorkspaceConfiguration,
+} from 'vscode'
+import type { execSync as execSyncFn } from 'node:child_process'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { ExtensionContext, TextDocument, TextEditor, Position, Selection } from 'vscode'
 
 // ---------------------------------------------------------------------------
 // vscode mock setup (must be before extension import)
 // ---------------------------------------------------------------------------
 
 const registeredCommands = new Map<string, (...args: unknown[]) => unknown>()
-let taskEndHandler: ((event: unknown) => void) | undefined
+let taskEndHandler: ((event: TaskEndEvent) => void) | undefined
 
 const mockConfigValues: Record<string, string> = {
   runtime: 'node',
@@ -15,7 +26,9 @@ const mockConfigValues: Record<string, string> = {
 }
 
 const mockConfig = {
-  get: vi.fn<(key: string, fallback: string) => string>((key: string, fallback: string) => mockConfigValues[key] ?? fallback),
+  get: vi.fn<(key: string, fallback: string) => string>(
+    (key: string, fallback: string) => mockConfigValues[key] ?? fallback,
+  ),
 }
 
 vi.mock('vscode', () => {
@@ -30,13 +43,18 @@ vi.mock('vscode', () => {
     window: {
       activeTextEditor: null as TextEditor | null,
       showWarningMessage: vi.fn<(msg: string) => void>(),
-      createOutputChannel: vi.fn<() => { appendLine: (msg: string) => void; dispose: () => void }>(() => ({
-        appendLine: vi.fn<(msg: string) => void>(),
-        dispose: vi.fn<() => void>(),
-      })),
+      createOutputChannel: vi.fn<() => OutputChannel>(
+        () =>
+          ({
+            appendLine: vi.fn<(msg: string) => void>(),
+            dispose: vi.fn<() => void>(),
+          }) as unknown as OutputChannel,
+      ),
     },
     workspace: {
-      getConfiguration: vi.fn<() => typeof mockConfig>(() => mockConfig),
+      getConfiguration: vi.fn<() => WorkspaceConfiguration>(
+        () => mockConfig as unknown as WorkspaceConfiguration,
+      ),
     },
     debug: {
       breakpoints: [] as unknown[],
@@ -44,22 +62,26 @@ vi.mock('vscode', () => {
     },
     tasks: {
       executeTask: vi.fn<() => void>(),
-      onDidEndTask: vi.fn<(handler: (event: unknown) => void) => { dispose: () => void }>((handler: (event: unknown) => void) => {
-        taskEndHandler = handler
-        return { dispose: vi.fn<() => void>() }
-      }),
+      onDidEndTask: vi.fn<(handler: (event: TaskEndEvent) => void) => Disposable>(
+        (handler: (event: TaskEndEvent) => void) => {
+          taskEndHandler = handler
+          return { dispose: vi.fn<() => void>() }
+        },
+      ),
     },
     commands: {
-      registerCommand: vi.fn<(id: string, handler: (...args: unknown[]) => unknown) => { dispose: () => void }>((id: string, handler: (...args: unknown[]) => unknown) => {
-        registeredCommands.set(id, handler)
-        return { dispose: vi.fn<() => void>() }
-      }),
+      registerCommand: vi.fn<(id: string, handler: (...args: unknown[]) => unknown) => Disposable>(
+        (id: string, handler: (...args: unknown[]) => unknown) => {
+          registeredCommands.set(id, handler)
+          return { dispose: vi.fn<() => void>() }
+        },
+      ),
     },
     Task: vi.fn<(def: unknown) => void>(function (this: Record<string, unknown>, def: unknown) {
       this.definition = def
     }),
     TaskScope: { Workspace: 2 },
-    ShellExecution: vi.fn<() => void>(),
+    ProcessExecution: vi.fn<() => void>(),
     TaskRevealKind: { Always: 2 },
     TaskPanelKind: { Shared: 2 },
     SourceBreakpoint: MockSourceBreakpoint,
@@ -67,21 +89,21 @@ vi.mock('vscode', () => {
 })
 
 vi.mock('node:child_process', () => ({
-  execSync: vi.fn<() => string>(() => 'v23.6.0\n'),
+  execSync: vi.fn<typeof execSyncFn>(),
 }))
 
-// Import extension after mocks are set up
-import { activate, deactivate, pendingCleanup } from '../extension'
-import * as vscode from 'vscode'
 import { execSync } from 'node:child_process'
 import * as fs from 'node:fs'
+import * as vscode from 'vscode'
+// Import extension after mocks are set up
+import { activate, deactivate, pendingCleanup } from '../extension'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function makeDocument(overrides: Partial<TextDocument> = {}): TextDocument {
-  const lines = (overrides as Record<string, unknown>).testLines as string[] ?? []
+  const lines = ((overrides as Record<string, unknown>).testLines as string[]) ?? []
   return {
     languageId: 'javascript',
     fileName: '/test/file.js',
@@ -115,23 +137,33 @@ function makeSelection(
   } as unknown as Selection
 }
 
-function makeTaskEndEvent(filePath: string, type = 'quick-run-js-ts') {
+function makeTaskEndEvent(filePath: string, type = 'quick-run-js-ts'): TaskEndEvent {
   return {
     execution: {
       task: {
         definition: { type, filePath },
       },
     },
-  }
+  } as unknown as TaskEndEvent
 }
 
 function activateExtension() {
-  const context = { subscriptions: [] as { dispose(): void }[] } as unknown as ExtensionContext
+  const context = { subscriptions: [] as Disposable[] } as unknown as ExtensionContext
   activate(context)
 }
 
 function setBreakpoints(bps: unknown[]) {
   ;(vscode.debug as unknown as { breakpoints: unknown[] }).breakpoints = bps
+}
+
+function mockExec(version: string) {
+  vi.mocked(execSync).mockReturnValue(version)
+}
+
+function mockExecFail() {
+  vi.mocked(execSync).mockImplementation(() => {
+    throw new Error('not found')
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -149,7 +181,7 @@ describe('Quick Run JS/TS', () => {
     ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = null
     setBreakpoints([])
     pendingCleanup.clear()
-    vi.mocked(execSync).mockReturnValue('v23.6.0\n')
+    mockExec('v23.6.0\n')
   })
 
   // =========================================================================
@@ -234,13 +266,19 @@ describe('Quick Run JS/TS', () => {
 
     it('falls back to file extension when language ID is unknown', async () => {
       const { resolveExtension } = await import('../extension')
-      const doc = makeDocument({ languageId: 'unknown', fileName: '/test/file.mjs' } as Partial<TextDocument>)
+      const doc = makeDocument({
+        languageId: 'unknown',
+        fileName: '/test/file.mjs',
+      } as Partial<TextDocument>)
       expect(resolveExtension(doc)).toBe('.mjs')
     })
 
     it('returns null when no extension can be resolved', async () => {
       const { resolveExtension } = await import('../extension')
-      const doc = makeDocument({ languageId: 'unknown', fileName: '/test/file' } as Partial<TextDocument>)
+      const doc = makeDocument({
+        languageId: 'unknown',
+        fileName: '/test/file',
+      } as Partial<TextDocument>)
       expect(resolveExtension(doc)).toBeNull()
     })
   })
@@ -255,33 +293,33 @@ describe('Quick Run JS/TS', () => {
     })
 
     it('resolves version from `node -v` output', async () => {
-      vi.mocked(execSync).mockReturnValue('v22.6.1\n')
+      mockExec('v22.6.1\n')
       const { isNodeVersionGte } = await import('../extension')
-      expect(isNodeVersionGte(22, 6)).toBe(true)
+      expect(await isNodeVersionGte(22, 6)).toBe(true)
     })
 
     it('returns [0,0,0] on exec failure', async () => {
-      vi.mocked(execSync).mockImplementation(() => { throw new Error('not found') })
+      mockExecFail()
       const { isNodeVersionGte } = await import('../extension')
-      expect(isNodeVersionGte(1, 0)).toBe(false)
+      expect(await isNodeVersionGte(1, 0)).toBe(false)
     })
 
     it('handles major version comparison', async () => {
-      vi.mocked(execSync).mockReturnValue('v24.0.0\n')
+      mockExec('v24.0.0\n')
       const { isNodeVersionGte } = await import('../extension')
-      expect(isNodeVersionGte(23, 6)).toBe(true)
+      expect(await isNodeVersionGte(23, 6)).toBe(true)
     })
 
     it('handles exact version match', async () => {
-      vi.mocked(execSync).mockReturnValue('v22.6.0\n')
+      mockExec('v22.6.0\n')
       const { isNodeVersionGte } = await import('../extension')
-      expect(isNodeVersionGte(22, 6)).toBe(true)
+      expect(await isNodeVersionGte(22, 6)).toBe(true)
     })
 
     it('rejects lower minor version', async () => {
-      vi.mocked(execSync).mockReturnValue('v22.5.0\n')
+      mockExec('v22.5.0\n')
       const { isNodeVersionGte } = await import('../extension')
-      expect(isNodeVersionGte(22, 6)).toBe(false)
+      expect(await isNodeVersionGte(22, 6)).toBe(false)
     })
   })
 
@@ -292,7 +330,7 @@ describe('Quick Run JS/TS', () => {
   describe('temp files', () => {
     it('writeTempFile creates file and returns path with correct extension', async () => {
       const { writeTempFile } = await import('../extension')
-      const filePath = writeTempFile('.ts', 'const x = 1')
+      const filePath = await writeTempFile('.ts', 'const x = 1')
       try {
         expect(filePath).toMatch(/snippet-.*\.ts$/)
         expect(fs.existsSync(filePath)).toBe(true)
@@ -304,16 +342,16 @@ describe('Quick Run JS/TS', () => {
 
     it('cleanupTempFile removes the file from disk', async () => {
       const { writeTempFile, cleanupTempFile } = await import('../extension')
-      const filePath = writeTempFile('.js', 'test')
+      const filePath = await writeTempFile('.js', 'test')
       expect(fs.existsSync(filePath)).toBe(true)
-      cleanupTempFile(filePath)
+      await cleanupTempFile(filePath)
       expect(fs.existsSync(filePath)).toBe(false)
     })
 
     it('generates unique file names', async () => {
       const { writeTempFile } = await import('../extension')
-      const a = writeTempFile('.js', 'a')
-      const b = writeTempFile('.js', 'b')
+      const a = await writeTempFile('.js', 'a')
+      const b = await writeTempFile('.js', 'b')
       try {
         expect(a).not.toBe(b)
       } finally {
@@ -330,7 +368,9 @@ describe('Quick Run JS/TS', () => {
   describe('collectSelectedLines', () => {
     it('collects single selection', async () => {
       const { collectSelectedLines } = await import('../extension')
-      const doc = makeDocument({ testLines: ['line0', 'line1', 'line2'] } as unknown as Partial<TextDocument>)
+      const doc = makeDocument({
+        testLines: ['line0', 'line1', 'line2'],
+      } as unknown as Partial<TextDocument>)
       const sel = makeSelection(0, 0, 1, 5)
       const editor = makeEditor(doc, [sel])
       expect(collectSelectedLines(editor)).toBe('line0\nline1')
@@ -338,7 +378,9 @@ describe('Quick Run JS/TS', () => {
 
     it('excludes end line when selection ends at char 0', async () => {
       const { collectSelectedLines } = await import('../extension')
-      const doc = makeDocument({ testLines: ['line0', 'line1', 'line2'] } as unknown as Partial<TextDocument>)
+      const doc = makeDocument({
+        testLines: ['line0', 'line1', 'line2'],
+      } as unknown as Partial<TextDocument>)
       const sel = makeSelection(0, 0, 2, 0)
       const editor = makeEditor(doc, [sel])
       expect(collectSelectedLines(editor)).toBe('line0\nline1')
@@ -346,7 +388,9 @@ describe('Quick Run JS/TS', () => {
 
     it('skips empty selections (bare cursor)', async () => {
       const { collectSelectedLines } = await import('../extension')
-      const doc = makeDocument({ testLines: ['line0', 'line1'] } as unknown as Partial<TextDocument>)
+      const doc = makeDocument({
+        testLines: ['line0', 'line1'],
+      } as unknown as Partial<TextDocument>)
       const empty = makeSelection(0, 0, 0, 0)
       const editor = makeEditor(doc, [empty])
       expect(collectSelectedLines(editor)).toBe('')
@@ -370,7 +414,9 @@ describe('Quick Run JS/TS', () => {
 
     it('merges non-continuous selections', async () => {
       const { collectSelectedLines } = await import('../extension')
-      const doc = makeDocument({ testLines: ['line0', 'line1', 'line2', 'line3'] } as unknown as Partial<TextDocument>)
+      const doc = makeDocument({
+        testLines: ['line0', 'line1', 'line2', 'line3'],
+      } as unknown as Partial<TextDocument>)
       const sel1 = makeSelection(0, 0, 0, 5)
       const sel2 = makeSelection(2, 0, 3, 5)
       const editor = makeEditor(doc, [sel1, sel2])
@@ -391,7 +437,10 @@ describe('Quick Run JS/TS', () => {
 
     it('shows warning for unsupported file type', async () => {
       const { getRunContext } = await import('../extension')
-      const doc = makeDocument({ languageId: 'json', fileName: '/test/file.json' } as Partial<TextDocument>)
+      const doc = makeDocument({
+        languageId: 'json',
+        fileName: '/test/file.json',
+      } as Partial<TextDocument>)
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
       expect(getRunContext()).toBeNull()
       expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('Unsupported file type')
@@ -399,7 +448,10 @@ describe('Quick Run JS/TS', () => {
 
     it('returns context for supported JS file', async () => {
       const { getRunContext } = await import('../extension')
-      const doc = makeDocument({ languageId: 'javascript', fileName: '/test/file.js' } as Partial<TextDocument>)
+      const doc = makeDocument({
+        languageId: 'javascript',
+        fileName: '/test/file.js',
+      } as Partial<TextDocument>)
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
       const ctx = getRunContext()
       expect(ctx).not.toBeNull()
@@ -416,25 +468,34 @@ describe('Quick Run JS/TS', () => {
     it('returns false when mode is "never"', async () => {
       const { wantsDebug } = await import('../extension')
       mockConfigValues.debugMode = 'never'
-      const doc = makeDocument({ fileName: '/test/file.js', isUntitled: false } as Partial<TextDocument>)
+      const doc = makeDocument({
+        fileName: '/test/file.js',
+        isUntitled: false,
+      } as Partial<TextDocument>)
       expect(wantsDebug(doc)).toBe(false)
     })
 
     it('returns true when mode is "always"', async () => {
       const { wantsDebug } = await import('../extension')
       mockConfigValues.debugMode = 'always'
-      const doc = makeDocument({ fileName: '/test/file.js', isUntitled: false } as Partial<TextDocument>)
+      const doc = makeDocument({
+        fileName: '/test/file.js',
+        isUntitled: false,
+      } as Partial<TextDocument>)
       expect(wantsDebug(doc)).toBe(true)
     })
 
     it('returns true when mode is "auto" and breakpoints exist', async () => {
       const { wantsDebug } = await import('../extension')
       mockConfigValues.debugMode = 'auto'
-      const doc = makeDocument({ fileName: '/test/file.js', isUntitled: false } as Partial<TextDocument>)
+      const doc = makeDocument({
+        fileName: '/test/file.js',
+        isUntitled: false,
+      } as Partial<TextDocument>)
       setBreakpoints([
-        new (vscode as unknown as { SourceBreakpoint: new (loc: unknown) => unknown }).SourceBreakpoint(
-          { uri: { fsPath: '/test/file.js' } },
-        ),
+        new (
+          vscode as unknown as { SourceBreakpoint: new (loc: unknown) => unknown }
+        ).SourceBreakpoint({ uri: { fsPath: '/test/file.js' } }),
       ])
       expect(wantsDebug(doc)).toBe(true)
     })
@@ -442,7 +503,10 @@ describe('Quick Run JS/TS', () => {
     it('returns false when mode is "auto" and no breakpoints', async () => {
       const { wantsDebug } = await import('../extension')
       mockConfigValues.debugMode = 'auto'
-      const doc = makeDocument({ fileName: '/test/file.js', isUntitled: false } as Partial<TextDocument>)
+      const doc = makeDocument({
+        fileName: '/test/file.js',
+        isUntitled: false,
+      } as Partial<TextDocument>)
       setBreakpoints([])
       expect(wantsDebug(doc)).toBe(false)
     })
@@ -450,11 +514,14 @@ describe('Quick Run JS/TS', () => {
     it('returns false for untitled files in "auto" mode even with breakpoints', async () => {
       const { wantsDebug } = await import('../extension')
       mockConfigValues.debugMode = 'auto'
-      const doc = makeDocument({ fileName: '/test/file.js', isUntitled: true } as Partial<TextDocument>)
+      const doc = makeDocument({
+        fileName: '/test/file.js',
+        isUntitled: true,
+      } as Partial<TextDocument>)
       setBreakpoints([
-        new (vscode as unknown as { SourceBreakpoint: new (loc: unknown) => unknown }).SourceBreakpoint(
-          { uri: { fsPath: '/test/file.js' } },
-        ),
+        new (
+          vscode as unknown as { SourceBreakpoint: new (loc: unknown) => unknown }
+        ).SourceBreakpoint({ uri: { fsPath: '/test/file.js' } }),
       ])
       expect(wantsDebug(doc)).toBe(false)
     })
@@ -469,17 +536,20 @@ describe('Quick Run JS/TS', () => {
       activateExtension()
     })
 
-    it('runs saved JS file as task', () => {
-      const doc = makeDocument({ languageId: 'javascript', fileName: '/test/file.js' } as Partial<TextDocument>)
+    it('runs saved JS file as task', async () => {
+      const doc = makeDocument({
+        languageId: 'javascript',
+        fileName: '/test/file.js',
+      } as Partial<TextDocument>)
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
 
-      registeredCommands.get('quick-run-js-ts.runFile')!()
+      await registeredCommands.get('quick-run-js-ts.runFile')!()
 
       expect(vscode.tasks.executeTask).toHaveBeenCalled()
       expect(vscode.debug.startDebugging).not.toHaveBeenCalled()
     })
 
-    it('runs untitled file via temp file', () => {
+    it('runs untitled file via temp file', async () => {
       const doc = makeDocument({
         languageId: 'javascript',
         isUntitled: true,
@@ -487,12 +557,12 @@ describe('Quick Run JS/TS', () => {
       } as unknown as Partial<TextDocument>)
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
 
-      registeredCommands.get('quick-run-js-ts.runFile')!()
+      await registeredCommands.get('quick-run-js-ts.runFile')!()
 
       expect(vscode.tasks.executeTask).toHaveBeenCalled()
     })
 
-    it('shows warning for untitled file in "always" debug mode but still runs', () => {
+    it('shows warning for untitled file in "always" debug mode but still runs', async () => {
       mockConfigValues.debugMode = 'always'
       const doc = makeDocument({
         languageId: 'javascript',
@@ -501,7 +571,7 @@ describe('Quick Run JS/TS', () => {
       } as unknown as Partial<TextDocument>)
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
 
-      registeredCommands.get('quick-run-js-ts.runFile')!()
+      await registeredCommands.get('quick-run-js-ts.runFile')!()
 
       expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
         'Debug mode is not available for untitled files. Please save the file first.',
@@ -510,55 +580,67 @@ describe('Quick Run JS/TS', () => {
       expect(vscode.debug.startDebugging).not.toHaveBeenCalled()
     })
 
-    it('launches debugger when breakpoints are set', () => {
+    it('launches debugger when breakpoints are set', async () => {
       mockConfigValues.debugMode = 'auto'
-      const doc = makeDocument({ languageId: 'javascript', fileName: '/test/file.js' } as Partial<TextDocument>)
+      const doc = makeDocument({
+        languageId: 'javascript',
+        fileName: '/test/file.js',
+      } as Partial<TextDocument>)
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
       setBreakpoints([
-        new (vscode as unknown as { SourceBreakpoint: new (loc: unknown) => unknown }).SourceBreakpoint(
-          { uri: { fsPath: '/test/file.js' } },
-        ),
+        new (
+          vscode as unknown as { SourceBreakpoint: new (loc: unknown) => unknown }
+        ).SourceBreakpoint({ uri: { fsPath: '/test/file.js' } }),
       ])
 
-      registeredCommands.get('quick-run-js-ts.runFile')!()
+      await registeredCommands.get('quick-run-js-ts.runFile')!()
 
       expect(vscode.debug.startDebugging).toHaveBeenCalled()
       expect(vscode.tasks.executeTask).not.toHaveBeenCalled()
     })
 
-    it('does nothing when no active editor', () => {
+    it('does nothing when no active editor', async () => {
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = null
-      registeredCommands.get('quick-run-js-ts.runFile')!()
+      await registeredCommands.get('quick-run-js-ts.runFile')!()
       expect(vscode.tasks.executeTask).not.toHaveBeenCalled()
       expect(vscode.debug.startDebugging).not.toHaveBeenCalled()
     })
 
-    it('runs TS file with experimental-strip-types on node >= 22.6', () => {
+    it('runs TS file with experimental-strip-types on node >= 22.6', async () => {
       // Reset commands and re-activate with new node version
       registeredCommands.clear()
-      vi.mocked(execSync).mockReturnValue('v22.6.0\n')
+      mockExec('v22.6.0\n')
       activateExtension()
 
-      const doc = makeDocument({ languageId: 'typescript', fileName: '/test/file.ts' } as Partial<TextDocument>)
+      const doc = makeDocument({
+        languageId: 'typescript',
+        fileName: '/test/file.ts',
+      } as Partial<TextDocument>)
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
 
-      registeredCommands.get('quick-run-js-ts.runFile')!()
+      await registeredCommands.get('quick-run-js-ts.runFile')!()
 
       expect(vscode.tasks.executeTask).toHaveBeenCalled()
-      expect(vscode.ShellExecution).toHaveBeenCalledWith(
-        expect.stringContaining('--experimental-strip-types'),
+      expect(vscode.ProcessExecution).toHaveBeenCalledWith(
+        'node',
+        expect.arrayContaining(['--experimental-strip-types']),
       )
     })
 
-    it('runs TS file with tsx fallback on older node', () => {
-      vi.mocked(execSync).mockReturnValue('v20.0.0\n')
+    it('runs TS file with tsx fallback on older node', async () => {
+      mockExec('v20.0.0\n')
       mockConfigValues.tsFallbackCommand = 'npx --yes tsx'
       vi.resetModules()
 
-      const doc = makeDocument({ languageId: 'typescript', fileName: '/test/file.ts' } as Partial<TextDocument>)
+      activateExtension()
+
+      const doc = makeDocument({
+        languageId: 'typescript',
+        fileName: '/test/file.ts',
+      } as Partial<TextDocument>)
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
 
-      registeredCommands.get('quick-run-js-ts.runFile')!()
+      await registeredCommands.get('quick-run-js-ts.runFile')!()
 
       expect(vscode.tasks.executeTask).toHaveBeenCalled()
     })
@@ -569,32 +651,41 @@ describe('Quick Run JS/TS', () => {
       activateExtension()
     })
 
-    it('runs selected lines via temp file', () => {
+    it('runs selected lines via temp file', async () => {
       const doc = makeDocument({
         languageId: 'javascript',
         fileName: '/test/file.js',
         testLines: ['const a = 1', 'const b = 2', 'const c = 3'],
       } as unknown as Partial<TextDocument>)
       const sel = makeSelection(0, 0, 1, 11)
-      ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc, [sel])
+      ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(
+        doc,
+        [sel],
+      )
 
-      registeredCommands.get('quick-run-js-ts.runSelection')!()
+      await registeredCommands.get('quick-run-js-ts.runSelection')!()
 
       expect(vscode.tasks.executeTask).toHaveBeenCalled()
     })
 
-    it('shows warning when no content is selected', () => {
-      const doc = makeDocument({ languageId: 'javascript', fileName: '/test/file.js' } as Partial<TextDocument>)
+    it('shows warning when no content is selected', async () => {
+      const doc = makeDocument({
+        languageId: 'javascript',
+        fileName: '/test/file.js',
+      } as Partial<TextDocument>)
       const emptySel = makeSelection(0, 0, 0, 0)
-      ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc, [emptySel])
+      ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(
+        doc,
+        [emptySel],
+      )
 
-      registeredCommands.get('quick-run-js-ts.runSelection')!()
+      await registeredCommands.get('quick-run-js-ts.runSelection')!()
 
       expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('No content selected to run')
       expect(vscode.tasks.executeTask).not.toHaveBeenCalled()
     })
 
-    it('shows warning when debug would trigger on selection but still runs', () => {
+    it('shows warning when debug would trigger on selection but still runs', async () => {
       mockConfigValues.debugMode = 'always'
       const doc = makeDocument({
         languageId: 'javascript',
@@ -602,9 +693,12 @@ describe('Quick Run JS/TS', () => {
         testLines: ['const a = 1', 'const b = 2'],
       } as unknown as Partial<TextDocument>)
       const sel = makeSelection(0, 0, 1, 11)
-      ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc, [sel])
+      ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(
+        doc,
+        [sel],
+      )
 
-      registeredCommands.get('quick-run-js-ts.runSelection')!()
+      await registeredCommands.get('quick-run-js-ts.runSelection')!()
 
       expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
         'Debug mode is not available for running selections.',
@@ -612,9 +706,9 @@ describe('Quick Run JS/TS', () => {
       expect(vscode.tasks.executeTask).toHaveBeenCalled()
     })
 
-    it('does nothing when no active editor', () => {
+    it('does nothing when no active editor', async () => {
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = null
-      registeredCommands.get('quick-run-js-ts.runSelection')!()
+      await registeredCommands.get('quick-run-js-ts.runSelection')!()
       expect(vscode.tasks.executeTask).not.toHaveBeenCalled()
     })
   })
@@ -628,7 +722,7 @@ describe('Quick Run JS/TS', () => {
       activateExtension()
     })
 
-    it('cleans up temp file when task ends', () => {
+    it('cleans up temp file when task ends', async () => {
       const doc = makeDocument({
         languageId: 'javascript',
         isUntitled: true,
@@ -637,21 +731,24 @@ describe('Quick Run JS/TS', () => {
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
 
       // Run to create temp file
-      registeredCommands.get('quick-run-js-ts.runFile')!()
+      await registeredCommands.get('quick-run-js-ts.runFile')!()
 
       const executeTaskMock = vi.mocked(vscode.tasks.executeTask)
-      const task = executeTaskMock.mock.calls[0][0] as unknown as { definition: { filePath: string } }
+      const task = executeTaskMock.mock.calls[0][0] as unknown as {
+        definition: { filePath: string }
+      }
       const tempPath = task.definition.filePath
 
       expect(fs.existsSync(tempPath)).toBe(true)
 
       // Simulate task end
       taskEndHandler!(makeTaskEndEvent(tempPath))
+      await vi.waitFor(() => expect(fs.existsSync(tempPath)).toBe(false))
 
       expect(fs.existsSync(tempPath)).toBe(false)
     })
 
-    it('ignores task end events for non-matching task types', () => {
+    it('ignores task end events for non-matching task types', async () => {
       const doc = makeDocument({
         languageId: 'javascript',
         isUntitled: true,
@@ -659,10 +756,12 @@ describe('Quick Run JS/TS', () => {
       } as unknown as Partial<TextDocument>)
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
 
-      registeredCommands.get('quick-run-js-ts.runFile')!()
+      await registeredCommands.get('quick-run-js-ts.runFile')!()
 
       const executeTaskMock = vi.mocked(vscode.tasks.executeTask)
-      const task = executeTaskMock.mock.calls[0][0] as unknown as { definition: { filePath: string } }
+      const task = executeTaskMock.mock.calls[0][0] as unknown as {
+        definition: { filePath: string }
+      }
       const tempPath = task.definition.filePath
 
       taskEndHandler!(makeTaskEndEvent(tempPath, 'other-type'))
@@ -673,7 +772,7 @@ describe('Quick Run JS/TS', () => {
       fs.unlinkSync(tempPath)
     })
 
-    it('handles task end event with undefined filePath gracefully', () => {
+    it('handles task end event with undefined filePath gracefully', async () => {
       expect(() => {
         taskEndHandler!(makeTaskEndEvent(undefined as unknown as string))
       }).not.toThrow()
@@ -691,33 +790,67 @@ describe('Quick Run JS/TS', () => {
 
     it('returns runtime directly for JS extensions', async () => {
       const { resolveTsCommand } = await import('../extension')
-      expect(resolveTsCommand('.js', 'node')).toBe('node')
-      expect(resolveTsCommand('.mjs', 'bun')).toBe('bun')
+      expect(resolveTsCommand('.js', 'node')).toEqual({ executable: 'node', args: [] })
+      expect(resolveTsCommand('.mjs', 'bun')).toEqual({ executable: 'bun', args: [] })
     })
 
     it('returns runtime directly for non-node runtimes', async () => {
       const { resolveTsCommand } = await import('../extension')
-      expect(resolveTsCommand('.ts', 'bun')).toBe('bun')
-      expect(resolveTsCommand('.ts', 'deno')).toBe('deno')
+      expect(resolveTsCommand('.ts', 'bun')).toEqual({ executable: 'bun', args: [] })
+      expect(resolveTsCommand('.ts', 'deno')).toEqual({ executable: 'deno', args: [] })
     })
 
     it('returns runtime for TS on node >= 23.6 (native support)', async () => {
-      vi.mocked(execSync).mockReturnValue('v23.6.0\n')
+      mockExec('v23.6.0\n')
       const { resolveTsCommand } = await import('../extension')
-      expect(resolveTsCommand('.ts', 'node')).toBe('node')
+      expect(resolveTsCommand('.ts', 'node')).toEqual({ executable: 'node', args: [] })
+    })
+
+    it('preserves node runtime arguments', async () => {
+      mockExec('v23.6.0\n')
+      const { resolveTsCommand } = await import('../extension')
+      expect(resolveTsCommand('.ts', 'node --loader ts-node/esm')).toEqual({
+        executable: 'node',
+        args: ['--loader', 'ts-node/esm'],
+      })
     })
 
     it('adds --experimental-strip-types for node >= 22.6', async () => {
-      vi.mocked(execSync).mockReturnValue('v22.6.0\n')
+      mockExec('v22.6.0\n')
       const { resolveTsCommand } = await import('../extension')
-      expect(resolveTsCommand('.ts', 'node')).toBe('node --experimental-strip-types')
+      expect(resolveTsCommand('.ts', 'node')).toEqual({
+        executable: 'node',
+        args: ['--experimental-strip-types'],
+      })
+    })
+
+    it('appends --experimental-strip-types after existing node runtime arguments', async () => {
+      mockExec('v22.6.0\n')
+      const { resolveTsCommand } = await import('../extension')
+      expect(resolveTsCommand('.ts', 'node --no-warnings')).toEqual({
+        executable: 'node',
+        args: ['--no-warnings', '--experimental-strip-types'],
+      })
     })
 
     it('falls back to tsFallbackCommand for older node', async () => {
-      vi.mocked(execSync).mockReturnValue('v20.0.0\n')
+      mockExec('v20.0.0\n')
       mockConfigValues.tsFallbackCommand = 'npx --yes tsx'
       const { resolveTsCommand } = await import('../extension')
-      expect(resolveTsCommand('.ts', 'node')).toBe('npx --yes tsx')
+      expect(resolveTsCommand('.ts', 'node')).toEqual({
+        executable: 'npx',
+        args: ['--yes', 'tsx'],
+      })
+    })
+
+    it('parses quoted fallback executable paths', async () => {
+      mockExec('v20.0.0\n')
+      mockConfigValues.tsFallbackCommand = '"C:\\Program Files\\nodejs\\npx.cmd" --yes tsx'
+      const { resolveTsCommand } = await import('../extension')
+      expect(resolveTsCommand('.ts', 'node')).toEqual({
+        executable: 'C:\\Program Files\\nodejs\\npx.cmd',
+        args: ['--yes', 'tsx'],
+      })
     })
   })
 
@@ -734,7 +867,7 @@ describe('Quick Run JS/TS', () => {
       expect(taskEndHandler).toBeDefined()
     })
 
-    it('deactivate cleans up all pending temp files', () => {
+    it('deactivate cleans up all pending temp files', async () => {
       activateExtension()
 
       const doc = makeDocument({
@@ -744,15 +877,17 @@ describe('Quick Run JS/TS', () => {
       } as unknown as Partial<TextDocument>)
       ;(vscode.window as { activeTextEditor: TextEditor | null }).activeTextEditor = makeEditor(doc)
 
-      registeredCommands.get('quick-run-js-ts.runFile')!()
+      await registeredCommands.get('quick-run-js-ts.runFile')!()
 
       const executeTaskMock = vi.mocked(vscode.tasks.executeTask)
-      const task = executeTaskMock.mock.calls[0][0] as unknown as { definition: { filePath: string } }
+      const task = executeTaskMock.mock.calls[0][0] as unknown as {
+        definition: { filePath: string }
+      }
       const tempPath = task.definition.filePath
 
       expect(fs.existsSync(tempPath)).toBe(true)
 
-      deactivate()
+      await deactivate()
 
       expect(fs.existsSync(tempPath)).toBe(false)
     })

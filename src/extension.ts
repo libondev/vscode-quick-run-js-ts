@@ -1,10 +1,4 @@
-import type {
-  ExtensionContext,
-  TaskDefinition,
-  TaskEndEvent,
-  TextDocument,
-  TextEditor,
-} from 'vscode'
+import type { ExtensionContext, TaskEndEvent, TextDocument, TextEditor } from 'vscode'
 import { execSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -19,7 +13,7 @@ import {
   OutputChannel,
   Task,
   TaskScope,
-  ShellExecution,
+  ProcessExecution,
   TaskRevealKind,
   TaskPanelKind,
   SourceBreakpoint,
@@ -55,11 +49,6 @@ export const LANG_EXT_MAP: Record<string, string> = {
   typescript: '.ts',
 }
 
-interface QuickRunTaskDefinition extends TaskDefinition {
-  type: typeof TASK_TYPE
-  filePath: string
-}
-
 // ---------------------------------------------------------------------------
 // Node.js version detection
 // ---------------------------------------------------------------------------
@@ -69,9 +58,10 @@ let cachedNodeVersion: number[] | null = null
 function resolveNodeVersion(): number[] {
   try {
     const output = execSync('node -v', { encoding: 'utf-8', timeout: 1000 }).trim()
-    const match = output.match(/v(\d+)\.(\d+)\.(\d+)/)
+    const match = output.match(/^v(\d+)\.(\d+)\.(\d+)/)
     if (match) {
       const version = [Number(match[1]), Number(match[2]), Number(match[3])]
+      log(`Detected Node.js version: ${version.join('.')}`)
       return version
     }
     log(`Failed to parse Node.js version from output: "${output}"`)
@@ -87,12 +77,12 @@ export function isNodeVersionGte(major: number, minor: number): boolean {
     cachedNodeVersion = resolveNodeVersion()
   }
 
-  const [cachedMajor, cachedMinor] = cachedNodeVersion
-  return cachedMajor > major || (cachedMajor === major && cachedMinor >= minor)
+  const [currentMajor, currentMinor] = cachedNodeVersion
+  return currentMajor > major || (currentMajor === major && currentMinor >= minor)
 }
 
 export function isNode(runtime: string): boolean {
-  const base = basename(runtime)
+  const base = basename(parseCommand(runtime).executable)
   return base === 'node' || base === 'node.exe'
 }
 
@@ -100,12 +90,13 @@ export function isNode(runtime: string): boolean {
 // Temp file management
 // ---------------------------------------------------------------------------
 
+const tempDir = join(tmpdir(), 'quick-run-js-ts')
+
 export const pendingCleanup = new Set<string>()
 
 export function writeTempFile(ext: string, content: string): string {
-  const tmpDir = join(tmpdir(), 'quick-run-js-ts')
-  mkdirSync(tmpDir, { recursive: true })
-  const filePath = join(tmpDir, `snippet-${randomUUID()}${ext}`)
+  mkdirSync(tempDir, { recursive: true })
+  const filePath = join(tempDir, `snippet-${randomUUID()}${ext}`)
   writeFileSync(filePath, content, 'utf-8')
   return filePath
 }
@@ -124,18 +115,18 @@ export function cleanupTempFile(filePath: string) {
 // Editor / document helpers
 // ---------------------------------------------------------------------------
 
-interface RunContext {
-  editor: TextEditor
-  document: TextDocument
-  ext: string
-}
-
 export function resolveExtension(document: TextDocument): string | null {
   return LANG_EXT_MAP[document.languageId] || extname(document.fileName).toLowerCase() || null
 }
 
 export function isSupportedExtension(ext: string): boolean {
   return JS_EXTENSIONS.has(ext) || TS_EXTENSIONS.has(ext)
+}
+
+interface RunContext {
+  editor: TextEditor
+  document: TextDocument
+  ext: string
 }
 
 /**
@@ -190,50 +181,82 @@ export function collectSelectedLines(editor: TextEditor): string {
 // Task execution
 // ---------------------------------------------------------------------------
 
-export function resolveTsCommand(ext: string, runtime: string): string {
+interface RunCommand {
+  executable: string
+  args: string[]
+}
+
+export function parseCommand(command: string): RunCommand {
+  const parts: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+
+  for (const char of command.trim()) {
+    if ((char === '"' || char === "'") && (!quote || quote === char)) {
+      quote = quote ? null : char
+      continue
+    }
+
+    if (!quote && /\s/.test(char)) {
+      if (current) {
+        parts.push(current)
+        current = ''
+      }
+      continue
+    }
+
+    current += char
+  }
+
+  if (current) {
+    parts.push(current)
+  }
+
+  return { executable: parts[0] ?? '', args: parts.slice(1) }
+}
+
+export function resolveTsCommand(ext: string, runtime: string): RunCommand {
+  const runtimeCommand = parseCommand(runtime)
+
   if (JS_EXTENSIONS.has(ext) || !isNode(runtime)) {
-    return runtime
+    return runtimeCommand
   }
 
   if (isNodeVersionGte(23, 6)) {
-    return runtime
+    return runtimeCommand
   }
   if (isNodeVersionGte(22, 6)) {
-    return `${runtime} --experimental-strip-types`
+    return { ...runtimeCommand, args: [...runtimeCommand.args, '--experimental-strip-types'] }
   }
 
   const config = workspace.getConfiguration(CONFIG_SECTION)
-  return config.get<string>('tsFallbackCommand', 'npx --yes tsx')
-}
-
-function buildRunCommand(filePath: string, ext: string): string {
-  const config = workspace.getConfiguration(CONFIG_SECTION)
-  const nodeCmd = config.get<string>('runtime', 'node')
-  const cmd = resolveTsCommand(ext, nodeCmd)
-  return `${cmd} ${JSON.stringify(filePath)}`
+  const fallback = config.get<string>('tsFallbackCommand', 'npx --yes tsx')
+  return parseCommand(fallback)
 }
 
 function runFile(filePath: string, ext: string, isTemp: boolean) {
-  const definition: QuickRunTaskDefinition = { type: TASK_TYPE, filePath }
+  const config = workspace.getConfiguration(CONFIG_SECTION)
+  const runtime = config.get<string>('runtime', 'node')
+  const cmd = resolveTsCommand(ext, runtime)
+
+  const definition = { type: TASK_TYPE, filePath }
   const task = new Task(
     definition,
     TaskScope.Workspace,
     'Run JS/TS',
     TASK_TYPE,
-    new ShellExecution(buildRunCommand(filePath, ext)),
+    new ProcessExecution(cmd.executable, [...cmd.args, filePath]),
   )
   task.presentationOptions = {
     reveal: TaskRevealKind.Always,
     panel: TaskPanelKind.Shared,
     focus: true,
+    clear: true,
   }
 
   if (isTemp) {
     pendingCleanup.add(filePath)
   }
-
-  // Clear previous terminal output before running a new task
-  commands.executeCommand('workbench.action.terminal.clear')
 
   tasks.executeTask(task)
 }
@@ -244,17 +267,16 @@ function runFile(filePath: string, ext: string, isTemp: boolean) {
 
 function runWithDebug(filePath: string, ext: string) {
   const config = workspace.getConfiguration(CONFIG_SECTION)
-  const nodeCmd = config.get<string>('runtime', 'node')
-  const cmd = resolveTsCommand(ext, nodeCmd)
-  const parts = cmd.split(/\s+/)
+  const runtime = config.get<string>('runtime', 'node')
+  const cmd = resolveTsCommand(ext, runtime)
 
   debug.startDebugging(undefined, {
     type: 'node',
     request: 'launch',
     name: 'Quick Run JS/TS',
     program: filePath,
-    runtimeExecutable: parts[0],
-    runtimeArgs: parts.slice(1),
+    runtimeExecutable: cmd.executable,
+    runtimeArgs: cmd.args,
     console: 'integratedTerminal',
   })
 }
@@ -262,15 +284,6 @@ function runWithDebug(filePath: string, ext: string) {
 // ---------------------------------------------------------------------------
 // Command handlers
 // ---------------------------------------------------------------------------
-
-function hasBreakpoints(filePath: string): boolean {
-  return debug.breakpoints.some((bp) => {
-    if (bp instanceof SourceBreakpoint) {
-      return bp.location.uri.fsPath === filePath
-    }
-    return false
-  })
-}
 
 export function wantsDebug(document: TextDocument): boolean {
   const config = workspace.getConfiguration(CONFIG_SECTION)
@@ -287,7 +300,13 @@ export function wantsDebug(document: TextDocument): boolean {
   if (document.isUntitled) {
     return false
   }
-  return hasBreakpoints(document.fileName)
+
+  return debug.breakpoints.some((bp) => {
+    if (bp instanceof SourceBreakpoint) {
+      return bp.location.uri.fsPath === document.fileName
+    }
+    return false
+  })
 }
 
 function handleRunFile() {
@@ -337,9 +356,8 @@ function handleTaskEnd(event: TaskEndEvent) {
     return
   }
 
-  const { filePath } = definition as QuickRunTaskDefinition
-  if (filePath && pendingCleanup.has(filePath)) {
-    cleanupTempFile(filePath)
+  if (definition.filePath && pendingCleanup.has(definition.filePath)) {
+    cleanupTempFile(definition.filePath)
   }
 }
 
@@ -356,18 +374,12 @@ export const activate = (context: ExtensionContext) => {
     commands.registerCommand('quick-run-js-ts.runSelection', handleRunSelection),
     tasks.onDidEndTask(handleTaskEnd),
   )
-
-  // Eagerly detect and cache the Node.js version
-  cachedNodeVersion = resolveNodeVersion()
 }
 
 export function deactivate() {
-  try {
-    for (const filePath of pendingCleanup) {
-      unlinkSync(filePath)
-    }
-  } catch {}
+  for (const filePath of pendingCleanup) {
+    cleanupTempFile(filePath)
+  }
 
-  pendingCleanup.clear()
   outputChannel?.dispose()
 }
